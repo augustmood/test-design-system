@@ -2,7 +2,7 @@
  * APSC design system base stylesheet — local copy.
  *
  * Upstream URL (as enqueued by the APSC theme with handle `apsc-style-guide`):
- *   https://apsc-design-system.netlify.app/apsc-base.min.css?ver=1.0.0
+ *   https://apsc-design-system.netlify.app/apsc-base.min.css
  *
  * That Netlify host is unreachable (ERR_TIMED_OUT), which blocks render
  * for ~30s on every page load. Host this file somewhere reachable (Media
