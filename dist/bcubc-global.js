@@ -1,9 +1,19 @@
 /*
- * Blockchain@UBC -- UBC CMS "Global Javascript Editor" contents.
+ * Blockchain@UBC -- bcubc-global.js. Hosted via jsDelivr CDN, NOT pasted
+ * directly into the wp-admin Global Javascript Editor.
  *
- * Paste this file into the CMS panel: wp-admin top bar -> (site settings) ->
- * Global Javascript Editor. Save. No Delete Cache needed for JS (not page-
- * cached).
+ * Deploy path:
+ *   1. Edit this file in the migration repo.
+ *   2. Copy to ../test-design-system/dist/bcubc-global.js, commit + push,
+ *      tag a new version (e.g. v2026.05.14.1).
+ *   3. Compute SRI: curl -s <CDN-URL> | openssl dgst -sha384 -binary | openssl base64 -A
+ *   4. Update V + SRI in global-javascript-bootstrap.js, repaste bootstrap
+ *      into the panel (only step that touches wp-admin).
+ *
+ * Why this indirection: the wp-admin panel + UBC WAF rejects cookie-POSTs
+ * of large or JS-heavy bodies. The ~30KB+ source file can't ship via
+ * wp_deploy.py update-js. Bootstrap stays small enough to pass WAF and is
+ * pasted only when the version pin changes.
  *
  * What this script does:
  *   1. Rebuilds Research Talks listing rows from a pipe-delimited plain-text
@@ -709,15 +719,23 @@
 
 
   // ---------------------------------------------------------------
-  // Past Conferences / Past Industry Events -- client-side filter.
-  // Both listing pages share the same six event cards plus a small
-  // filter form (Keywords + Event type). Drupal had this as an exposed
-  // Views filter; we replicate the UX client-side so we don't need a
-  // CPT or plugin. This handler self-scopes via the data attribute
-  // selector below -- on any page without the form, it short-circuits.
-  // See wp-assets/pages/events/past-conferences.html for the markup
-  // contract (data-type and data-keywords on each card; form fields kw
-  // and type; optional data-bcubc-events-empty placeholder).
+  // Past Conferences / Past Industry Events -- client-side filter
+  // over a wp:query block. Both listing pages render the same Query
+  // Loop (event detail pages under /events/, listing pages excluded);
+  // the only per-page difference is the Event-type dropdown's default
+  // value. Drupal had this as an exposed Views filter; we replicate
+  // the UX client-side so we don't need a CPT or plugin.
+  //
+  // Excerpt contract on each event detail page (set via wp_deploy.py
+  // create-page --excerpt or update-page --excerpt):
+  //   "Type|Date|Body"
+  // Type is "Conference" or "Industry Event"; Date is a human-readable
+  // string for the card; Body is the visible excerpt text.
+  //
+  // This handler self-scopes via the data-bcubc-events-list selector
+  // below -- on any page without that container, it short-circuits.
+  // See wp-assets/pages/events/past-conferences.html for the full
+  // markup + architecture notes.
   // ---------------------------------------------------------------
   function wireEventsFilter() {
     var form = document.querySelector('[data-bcubc-events-filter]');
@@ -725,7 +743,48 @@
     if (!form || !list) return;
     var cards = list.querySelectorAll('.bcubc-event-card');
     if (!cards.length) return;
-    var empty = list.querySelector('[data-bcubc-events-empty]');
+
+    cards.forEach(function (card) {
+      var excerptEl = card.querySelector('.bcubc-event-card__excerpt');
+      if (!excerptEl) return;
+      var raw = (excerptEl.textContent || '').trim();
+      // p tag inside excerpt may carry the actual text + a "Read more" link
+      var paragraph = excerptEl.querySelector('p');
+      if (paragraph) raw = (paragraph.textContent || '').trim();
+      var parts = raw.split('|');
+      if (parts.length < 3) return;
+      var type = parts[0].trim();
+      var date = parts[1].trim();
+      var body = parts.slice(2).join('|').trim();
+      card.setAttribute('data-type', type);
+      // Inject the date stamp ABOVE the title (matches Drupal listing).
+      var titleEl = card.querySelector('.bcubc-event-card__title');
+      if (titleEl && !card.querySelector('.bcubc-event-card__date')) {
+        var dateEl = document.createElement('p');
+        dateEl.className = 'bcubc-event-card__date';
+        dateEl.textContent = date;
+        titleEl.parentNode.insertBefore(dateEl, titleEl);
+      }
+      // Replace the excerpt text with just the body portion.
+      if (paragraph) {
+        paragraph.textContent = body;
+      } else {
+        excerptEl.textContent = body;
+      }
+    });
+
+    // Read the body class to pick the per-page default filter value.
+    // (page-past-conferences -> Conference; page-past-industry-events
+    // -> Industry Event. The form already has selected="selected" set
+    // server-side; reapply here as a defensive guard for cache edge.)
+    var bodyCls = document.body.className || '';
+    if (form.elements.type) {
+      if (/page-past-conferences\b/.test(bodyCls) && !form.elements.type.value) {
+        form.elements.type.value = 'Conference';
+      } else if (/page-past-industry-events\b/.test(bodyCls) && !form.elements.type.value) {
+        form.elements.type.value = 'Industry Event';
+      }
+    }
 
     function apply() {
       var kw = (form.elements.kw && form.elements.kw.value || '').trim().toLowerCase();
@@ -734,13 +793,15 @@
       cards.forEach(function (card) {
         var match = true;
         if (type && card.getAttribute('data-type') !== type) match = false;
-        if (kw) {
-          var hay = (card.getAttribute('data-keywords') || '') + ' ' + (card.textContent || '');
-          if (hay.toLowerCase().indexOf(kw) === -1) match = false;
-        }
+        if (kw && (card.textContent || '').toLowerCase().indexOf(kw) === -1) match = false;
         card.hidden = !match;
+        // Some Query Loop renders wrap each card in <li class="wp-block-post">
+        // -- need to hide that wrapper too so the row collapses.
+        var wrapper = card.closest('li.wp-block-post');
+        if (wrapper) wrapper.hidden = !match;
         if (match) visible++;
       });
+      var empty = list.querySelector('.bcubc-events-list__empty, [data-bcubc-events-empty]');
       if (empty) empty.hidden = visible !== 0;
     }
 
